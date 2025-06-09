@@ -13,7 +13,7 @@
         type="submit"
         color="primary"
         no-caps
-      />
+      />  
     </q-form>
 
     <div v-if="tasks.length" class="q-mt-lg">
@@ -100,6 +100,9 @@ const originalEditingTitle = ref<string | null>(null);
 // Reactive variable to store the ID of the task being edited (optional, but helps find it)
 const editingTaskId = ref<number | null>(null);
 
+// Counter for generating unique IDs for new tasks
+let nextLocalId = 10001; // Start with a high number to avoid conflicts
+
 // Base API URL
 const API_URL = 'https://jsonplaceholder.typicode.com/todos';
 
@@ -112,12 +115,34 @@ const getTasks = async () => {
 // Add task (Create)
 const addTask = async () => {
   if (!newTask.value.title.trim()) return;
-  const response = await axios.post<Task>(API_URL, {
-    title: newTask.value.title,
-    completed: false,
-  });
-  tasks.value.unshift({ ...response.data, isEditing: false });
-  newTask.value.title = '';
+  
+  try {
+    const response = await axios.post<Task>(API_URL, {
+      title: newTask.value.title,
+      completed: false,
+    });
+    
+    // Create a new task object with a guaranteed unique local ID
+    const newTaskObject = {
+      ...response.data,
+      isEditing: false,
+      id: nextLocalId++ // Use incremental counter for local tasks
+    };
+    
+    tasks.value.unshift(newTaskObject);
+    newTask.value.title = '';
+  } catch (error) {
+    console.error('Error adding task:', error);
+    // Even if API fails, create task locally
+    const newTaskObject = {
+      id: nextLocalId++,
+      title: newTask.value.title,
+      completed: false,
+      isEditing: false
+    };
+    tasks.value.unshift(newTaskObject);
+    newTask.value.title = '';
+  }
 };
 
 // Function to enter edit mode
@@ -144,8 +169,24 @@ const saveTask = async (task: Task) => {
     return;
   }
 
-  // Call updateTask API function
-  await updateTask(task);
+  try {
+    // For new tasks (created locally), we'll simulate a successful update
+    if (task.id >= 10001) { // Local tasks start from 10001
+      // Just update the local state
+      task.isEditing = false;
+      originalEditingTitle.value = null;
+      editingTaskId.value = null;
+      return;
+    }
+
+    // For existing tasks from JSONPlaceholder, call the API
+    await updateTask(task);
+  } catch (error) {
+    console.error('Error saving task:', error);
+    // Revert changes on error
+    cancelEdit(task);
+    return;
+  }
 
   // Exit edit mode and clear original title state
   task.isEditing = false;
@@ -178,8 +219,30 @@ const updateTask = async (task: Task) => {
 
 // Delete task (Delete)
 const deleteTask = async (id: number) => {
-  await axios.delete(`${API_URL}/${id}`);
-  tasks.value = tasks.value.filter(task => task.id !== id);
+  try {
+    console.log('Deleting task with ID:', id); // Debug log
+    
+    // Only call the API for tasks from JSONPlaceholder (IDs < 10001)
+    if (id < 10001) {
+      console.log('Calling API to delete task:', id); // Debug log
+      await axios.delete(`${API_URL}/${id}`);
+    } else {
+      console.log('Skipping API call for local task:', id); // Debug log
+    }
+    
+    // Remove only the specific task from the local state
+    const originalLength = tasks.value.length;
+    tasks.value = tasks.value.filter(task => task.id !== id);
+    const newLength = tasks.value.length;
+    
+    console.log(`Tasks before deletion: ${originalLength}, after: ${newLength}`); // Debug log
+    
+    if (originalLength === newLength) {
+      console.warn('No task was deleted - task not found with ID:', id);
+    }
+  } catch (error) {
+    console.error('Error deleting task:', error);
+  }
 };
 
 // Fetch on component mount
@@ -187,4 +250,3 @@ onMounted(() => {
   void getTasks();
 });
 </script>
-
